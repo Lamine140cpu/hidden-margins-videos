@@ -22,8 +22,12 @@ jobs:
           (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
           jq -e . release.json > /dev/null
           for f in $(jq -r '.sha256 | to_entries[] | "\(.value)  \(.key)"' release.json | tr ' ' '|'); do grep -q "$(echo $f | tr '|' ' ')" dist/SHA256SUMS; done
-          gh release create "$TAG" dist/*.mp4 dist/*.jpg --repo "$GITHUB_REPOSITORY" --title "$(jq -r .title release.json)" --notes "$(jq -r .notes release.json)" 2>/dev/null \
-            || gh release upload "$TAG" dist/*.mp4 dist/*.jpg --repo "$GITHUB_REPOSITORY" --clobber
+          FILES=$(find dist -type f ! -name SHA256SUMS | sort)
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" $FILES --repo "$GITHUB_REPOSITORY" --title "$(jq -r .title release.json)" --notes "$(jq -r .notes release.json)"
+          fi
       - name: Delete the upload branch
         if: always()
         env:
