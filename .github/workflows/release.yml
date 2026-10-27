@@ -1,0 +1,31 @@
+# Turns a pushed upload branch into a public Release asset, then deletes the branch.
+# The pipeline pushes branch upload/<tag> holding <name>.mp4.partNN (each < 100 MB) and release.json.
+name: release-video
+on:
+  push:
+    branches: ["upload/**"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reassemble and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#upload/}"
+          mkdir dist
+          for f in $(ls *.part* | sed 's/\.part[0-9]*$//' | sort -u); do cat $(ls "$f".part* | sort) > "dist/$f"; done
+          (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+          jq -e . release.json > /dev/null
+          for f in $(jq -r '.sha256 | to_entries[] | "\(.value)  \(.key)"' release.json | tr ' ' '|'); do grep -q "$(echo $f | tr '|' ' ')" dist/SHA256SUMS; done
+          gh release create "$TAG" dist/*.mp4 dist/*.jpg --repo "$GITHUB_REPOSITORY" --title "$(jq -r .title release.json)" --notes "$(jq -r .notes release.json)" 2>/dev/null \
+            || gh release upload "$TAG" dist/*.mp4 dist/*.jpg --repo "$GITHUB_REPOSITORY" --clobber
+      - name: Delete the upload branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/${GITHUB_REF_NAME}"
